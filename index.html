@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Marks Converter — 25 to 10</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#f4f7fb;color:#172033}
+.wrap{max-width:1100px;margin:35px auto;padding:0 18px}.card{background:white;border-radius:16px;padding:24px;box-shadow:0 8px 28px #00000012;margin-bottom:18px}
+h1{margin:0 0 8px;font-size:28px}.sub{color:#687386;margin-bottom:22px}
+.upload{border:2px dashed #9eb0c9;border-radius:14px;padding:30px;text-align:center;background:#f8fbff;cursor:pointer}
+.upload:hover{background:#f1f7ff}.upload input{display:none}.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+button{border:0;border-radius:9px;padding:11px 16px;font-weight:700;cursor:pointer;background:#1769e0;color:#fff}
+button.secondary{background:#e9eef5;color:#172033}button:disabled{opacity:.45;cursor:not-allowed}
+.info{display:flex;gap:10px;flex-wrap:wrap;margin:15px 0}.pill{padding:8px 12px;background:#eef4ff;border-radius:999px;font-size:13px}
+.table-wrap{overflow:auto;border:1px solid #e3e8ef;border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:600px}th,td{padding:10px 12px;border-bottom:1px solid #e8edf3;text-align:left}th{background:#f5f7fa;position:sticky;top:0}
+td:last-child,th:last-child{font-weight:700}.empty{text-align:center;color:#748096;padding:35px}
+.note{font-size:13px;color:#687386;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="card">
+<h1>Marks Converter</h1>
+<div class="sub">Upload an Excel sheet, convert marks from <b>25 to 10</b>, keep all existing columns, and export the completed Excel and PDF.</div>
+<label class="upload">
+<input id="file" type="file" accept=".xlsx,.xls,.csv">
+<div><b>Click here to upload Excel sheet</b><br><span class="note">Expected columns include “Full Marks” and “Get”.</span></div>
+</label>
+<div class="info" id="info"></div>
+<div class="btns">
+<button id="excelBtn" disabled>Download Excel</button>
+<button id="pdfBtn" disabled>Download PDF</button>
+<button id="resetBtn" class="secondary">Reset</button>
+</div>
+</div>
+<div class="card">
+<div id="status" class="empty">No Excel file loaded.</div>
+<div class="table-wrap" id="tableWrap" style="display:none"></div>
+</div>
+</div>
+<script>
+let workbook=null, rows=[], headers=[];
+
+const fileInput=document.getElementById('file');
+const status=document.getElementById('status'), tableWrap=document.getElementById('tableWrap');
+const info=document.getElementById('info'), excelBtn=document.getElementById('excelBtn'), pdfBtn=document.getElementById('pdfBtn');
+
+fileInput.addEventListener('change', async e=>{
+ const file=e.target.files[0]; if(!file)return;
+ const data=await file.arrayBuffer();
+ workbook=XLSX.read(data,{type:'array',cellDates:true});
+ const sheet=workbook.Sheets[workbook.SheetNames[0]];
+ const raw=XLSX.utils.sheet_to_json(sheet,{header:1,defval:""});
+ if(!raw.length){status.textContent="The first sheet is empty.";return;}
+ headers=raw[0].map(x=>String(x));
+ rows=raw.slice(1).filter(r=>r.some(v=>String(v).trim()!==""));
+ const getIdx=findHeader(["get","marks obtained","obtained marks"]);
+ const fullIdx=findHeader(["full marks","full mark","maximum marks","max marks"]);
+ let targetIdx=findHeader(["marks in 10","marks out of 10","mark in 10"]);
+ if(getIdx<0){status.textContent='Could not find a "Get" column.'; return;}
+ if(targetIdx<0){targetIdx=headers.length; headers.push("Marks in 10"); rows.forEach(r=>r.push(""));}
+
+ rows.forEach(r=>{
+   const get=parseFloat(r[getIdx]);
+   const full=fullIdx>=0 ? parseFloat(r[fullIdx]) : 25;
+   if(!Number.isNaN(get)) r[targetIdx]=round2(get*(10/(Number.isFinite(full)&&full>0?full:25)));
+ });
+ render();
+ excelBtn.disabled=pdfBtn.disabled=false;
+});
+
+function findHeader(names){
+ return headers.findIndex(h=>names.includes(String(h).trim().toLowerCase()));
+}
+function round2(n){return Math.round((n+Number.EPSILON)*100)/100}
+function render(){
+ info.innerHTML=`<span class="pill">Rows: ${rows.length}</span><span class="pill">Columns: ${headers.length}</span><span class="pill">Formula: Get ÷ Full Marks × 10</span>`;
+ let html="<table><thead><tr>"+headers.map(h=>`<th>${esc(h)}</th>`).join("")+"</tr></thead><tbody>";
+ rows.forEach(r=>{html+="<tr>"+headers.map((_,i)=>`<td>${esc(r[i]??"")}</td>`).join("")+"</tr>"});
+ html+="</tbody></table>"; tableWrap.innerHTML=html; tableWrap.style.display="block"; status.style.display="none";
+}
+function esc(v){return String(v).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;")}
+
+excelBtn.onclick=()=>{
+ const aoa=[headers,...rows];
+ const ws=XLSX.utils.aoa_to_sheet(aoa);
+ const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Marks");
+ XLSX.writeFile(wb,"marks_converted_25_to_10.xlsx");
+};
+pdfBtn.onclick=()=>{
+ const {jsPDF}=window.jspdf; const doc=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"});
+ doc.setFontSize(15); doc.text("Marks Converted: 25 to 10",14,14);
+ doc.setFontSize(9); doc.text("Formula: Get ÷ Full Marks × 10",14,20);
+ doc.autoTable({head:[headers],body:rows.map(r=>headers.map((_,i)=>r[i]??"")),startY:25,styles:{fontSize:7,cellPadding:2},headStyles:{fontSize:7},margin:{left:10,right:10}});
+ doc.save("marks_converted_25_to_10.pdf");
+};
+document.getElementById('resetBtn').onclick=()=>{
+ workbook=null;rows=[];headers=[];fileInput.value="";info.innerHTML="";tableWrap.style.display="none";status.style.display="block";status.textContent="No Excel file loaded.";excelBtn.disabled=pdfBtn.disabled=true;
+};
+</script>
+</body>
+</html>
